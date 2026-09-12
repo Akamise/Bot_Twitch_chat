@@ -45,10 +45,9 @@ class BotHelpersTests(unittest.TestCase):
         connection = FakeConnection()
         scheduler = MessageScheduler(connection, ["one", "two"], 0.03)
         scheduler.start()
-        time.sleep(0.085)
+        time.sleep(0.045)
         scheduler.stop()
-        self.assertGreaterEqual(len(connection.messages), 2)
-        self.assertEqual(connection.messages[:2], ["one", "two"])
+        self.assertEqual(connection.messages, ["one", "two"])
 
 
 if __name__ == "__main__":

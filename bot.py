@@ -301,14 +301,15 @@ class MessageScheduler:
         self._thread.start()
 
     def _run(self) -> None:
-        index = 0
         while not self._stop_event.wait(self.interval):
-            try:
-                self.connection.send_message(self.messages[index])
-            except (ConnectionError, OSError) as exc:
-                LOGGER.warning("Message was not sent: %s", exc)
-                return
-            index = (index + 1) % len(self.messages)
+            for message in self.messages:
+                if self._stop_event.is_set():
+                    return
+                try:
+                    self.connection.send_message(message)
+                except (ConnectionError, OSError) as exc:
+                    LOGGER.warning("Message was not sent: %s", exc)
+                    return
 
     def stop(self) -> None:
         self._stop_event.set()

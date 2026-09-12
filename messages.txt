@@ -1,3 +1,5 @@
 # One message per line. Empty lines and lines beginning with # are ignored.
 Добро пожаловать на стрим!
-Не забудьте нажать кнопку ОТСЛЕЖИВАТЬ) Мой TGK https://t.me/konomikochi Приятного просмотра!
+Понравилось? Не забудьте нажать кнопку ОТСЛЕЖИВАТЬ!
+Мой TGK: https://t.me/konomikochi
+Приятного просмотра!
