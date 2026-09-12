@@ -41,6 +41,10 @@ TWITCH_REFRESH_TOKEN=your_refresh_token
 хостинга, которая блокирует запись файла; в таком случае обновленные токены
 сохранятся лишь до перезапуска процесса.
 
+Если Twitch отклоняет обновление, получите новую пару access/refresh token
+через Authorization Code Flow именно для этого `TWITCH_CLIENT_ID`. `Client ID`,
+`Client Secret` и refresh token должны принадлежать одному Twitch-приложению.
+
 Настройка режима:
 
 ```dotenv

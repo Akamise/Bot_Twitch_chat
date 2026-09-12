@@ -230,6 +230,19 @@ class TwitchApi:
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = ""
+            try:
+                error_payload = json.loads(exc.read().decode("utf-8"))
+                error_name = error_payload.get("error")
+                error_message = error_payload.get("message")
+                if isinstance(error_name, str) and isinstance(error_message, str):
+                    detail = f": {error_name}: {error_message}"
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            raise TwitchApiError(
+                f"Could not refresh Twitch access token: HTTP {exc.code}{detail}"
+            ) from exc
         except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise TwitchApiError(f"Could not refresh Twitch access token: {exc}") from exc
         access_token = payload.get("access_token")
