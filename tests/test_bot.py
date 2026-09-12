@@ -1,9 +1,19 @@
+import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from bot import MessageScheduler, BotConfigError, load_messages, parse_bool
+from bot import (
+    BotConfigError,
+    MessageScheduler,
+    Settings,
+    TwitchBot,
+    load_messages,
+    parse_bool,
+    update_dotenv_values,
+)
 
 
 class FakeConnection:
@@ -22,6 +32,16 @@ class FakeConnection:
 
     def close(self):
         pass
+
+
+class FakeApi:
+    def __init__(self):
+        self.oauth_token = "old-access"
+
+    def refresh_access_token(self, client_secret, refresh_token):
+        self.client_secret = client_secret
+        self.refresh_token = refresh_token
+        return "new-access", "new-refresh"
 
 
 class BotHelpersTests(unittest.TestCase):
@@ -49,6 +69,56 @@ class BotHelpersTests(unittest.TestCase):
         scheduler.stop()
         self.assertGreaterEqual(len(connection.messages), 2)
         self.assertEqual(connection.messages[:2], ["one", "two"])
+
+    def test_update_dotenv_values_preserves_other_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "# keep this comment\nTWITCH_OAUTH_TOKEN=old\nOTHER=value\n",
+                encoding="utf-8",
+            )
+            update_dotenv_values(
+                path,
+                {
+                    "TWITCH_OAUTH_TOKEN": "new-access",
+                    "TWITCH_REFRESH_TOKEN": "new-refresh",
+                },
+            )
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "# keep this comment\nTWITCH_OAUTH_TOKEN=new-access\nOTHER=value\n"
+                "TWITCH_REFRESH_TOKEN=new-refresh\n",
+            )
+
+    def test_refresh_updates_runtime_settings_and_dotenv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dotenv_path = Path(directory) / ".env"
+            dotenv_path.write_text(
+                "TWITCH_OAUTH_TOKEN=old-access\nTWITCH_REFRESH_TOKEN=old-refresh\n",
+                encoding="utf-8",
+            )
+            settings = Settings(
+                client_id="client-id",
+                client_secret="client-secret",
+                oauth_token="old-access",
+                refresh_token="old-refresh",
+                bot_username="chatbot",
+                channel="streamer",
+                send_always=False,
+                message_interval=60,
+                status_check_interval=30,
+                reconnect_delay=5,
+                messages_file=Path(directory) / "messages.txt",
+                dotenv_path=dotenv_path,
+            )
+            api = FakeApi()
+            with patch.dict(os.environ, {}, clear=False):
+                bot = TwitchBot(settings, ["message"], api=api)
+                self.assertTrue(bot._refresh_tokens())
+                self.assertEqual(bot.settings.oauth_token, "new-access")
+                self.assertEqual(bot.settings.refresh_token, "new-refresh")
+                self.assertEqual(api.oauth_token, "new-access")
+                self.assertIn("TWITCH_OAUTH_TOKEN=new-access", dotenv_path.read_text())
 
 
 if __name__ == "__main__":
