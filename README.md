@@ -11,7 +11,6 @@
 - Сообщения отправляются по очереди из `messages.txt`; первое сообщение
   отправляется только после `TWITCH_MESSAGE_INTERVAL` секунд.
 - При разрыве IRC автоматически подключается снова.
-- При `401` от Twitch автоматически обновляет access token через refresh token.
 
 ## Настройка
 
@@ -24,26 +23,9 @@ Copy-Item .env.example .env
 
 Создайте приложение на
 [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps) и укажите его
-`Client ID` и `Client Secret`. Для IRC нужен OAuth-токен бота со scopes
-`chat:read` и `chat:edit`. В `TWITCH_CHANNEL` указывается логин отслеживаемого
-канала без `#`, а в `TWITCH_BOT_USERNAME` логин бота.
-
-Для автоматического обновления токена добавьте в `.env` значения, полученные
-через Authorization Code Flow того же Twitch-приложения:
-
-```dotenv
-TWITCH_CLIENT_SECRET=your_client_secret
-TWITCH_REFRESH_TOKEN=your_refresh_token
-```
-
-После успешного обновления бот атомарно заменяет `TWITCH_OAUTH_TOKEN` и
-`TWITCH_REFRESH_TOKEN` в `.env`. Не используйте для этих переменных панель
-хостинга, которая блокирует запись файла; в таком случае обновленные токены
-сохранятся лишь до перезапуска процесса.
-
-Если Twitch отклоняет обновление, получите новую пару access/refresh token
-через Authorization Code Flow именно для этого `TWITCH_CLIENT_ID`. `Client ID`,
-`Client Secret` и refresh token должны принадлежать одному Twitch-приложению.
+`Client ID`. Для IRC нужен OAuth-токен бота со scopes `chat:read` и
+`chat:edit`. В `TWITCH_CHANNEL` указывается логин отслеживаемого канала без
+`#`, а в `TWITCH_BOT_USERNAME` логин бота.
 
 Настройка режима:
 

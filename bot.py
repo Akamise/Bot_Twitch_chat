@@ -13,7 +13,7 @@ import socket
 import ssl
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 from urllib.error import HTTPError, URLError
@@ -62,27 +62,6 @@ def load_dotenv(path: Path) -> None:
             os.environ.setdefault(key, value)
 
 
-def update_dotenv_values(path: Path, values: dict[str, str]) -> None:
-    """Atomically update selected variables while preserving comments and settings."""
-    if not path.is_file():
-        raise BotConfigError(f"Cannot save refreshed tokens; .env file does not exist: {path}")
-    lines = path.read_text(encoding="utf-8").splitlines()
-    remaining = dict(values)
-    updated_lines = []
-    for line in lines:
-        key, separator, _ = line.partition("=")
-        normalized_key = key.strip()
-        if separator and normalized_key in remaining:
-            updated_lines.append(f"{normalized_key}={remaining.pop(normalized_key)}")
-        else:
-            updated_lines.append(line)
-    for key, value in remaining.items():
-        updated_lines.append(f"{key}={value}")
-    temporary_path = path.with_name(f".{path.name}.tmp")
-    temporary_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
-    temporary_path.replace(path)
-
-
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -104,9 +83,7 @@ def _positive_float(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     client_id: str
-    client_secret: Optional[str]
     oauth_token: str
-    refresh_token: Optional[str]
     bot_username: str
     channel: str
     send_always: bool
@@ -114,7 +91,6 @@ class Settings:
     status_check_interval: float
     reconnect_delay: float
     messages_file: Path
-    dotenv_path: Path
 
     @classmethod
     def from_environment(cls, base_dir: Optional[Path] = None) -> "Settings":
@@ -132,9 +108,7 @@ class Settings:
             messages_file = base_dir / messages_file
         return cls(
             client_id=_required_env("TWITCH_CLIENT_ID"),
-            client_secret=os.getenv("TWITCH_CLIENT_SECRET", "").strip() or None,
             oauth_token=token,
-            refresh_token=os.getenv("TWITCH_REFRESH_TOKEN", "").strip() or None,
             bot_username=_required_env("TWITCH_BOT_USERNAME").lower(),
             channel=channel,
             send_always=parse_bool(
@@ -147,7 +121,6 @@ class Settings:
             ),
             reconnect_delay=_positive_float("TWITCH_RECONNECT_DELAY", 5),
             messages_file=messages_file,
-            dotenv_path=base_dir / ".env",
         )
 
 
@@ -177,10 +150,6 @@ class TwitchApiError(RuntimeError):
     """Raised when Twitch status cannot be read."""
 
 
-class TwitchUnauthorizedError(TwitchApiError):
-    """Raised when Twitch rejects an access token."""
-
-
 class TwitchApi:
     def __init__(self, client_id: str, oauth_token: str, timeout: float = 15):
         self.client_id = client_id
@@ -200,56 +169,9 @@ class TwitchApi:
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            if exc.code == 401:
-                raise TwitchUnauthorizedError("Twitch rejected the access token") from exc
-            raise TwitchApiError(f"Could not read Twitch stream status: {exc}") from exc
         except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise TwitchApiError(f"Could not read Twitch stream status: {exc}") from exc
         return bool(payload.get("data"))
-
-    def refresh_access_token(
-        self,
-        client_secret: str,
-        refresh_token: str,
-    ) -> tuple[str, str]:
-        body = urlencode(
-            {
-                "client_id": self.client_id,
-                "client_secret": client_secret,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-            }
-        ).encode("utf-8")
-        request = Request(
-            "https://id.twitch.tv/oauth2/token",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            detail = ""
-            try:
-                error_payload = json.loads(exc.read().decode("utf-8"))
-                error_name = error_payload.get("error")
-                error_message = error_payload.get("message")
-                if isinstance(error_name, str) and isinstance(error_message, str):
-                    detail = f": {error_name}: {error_message}"
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                pass
-            raise TwitchApiError(
-                f"Could not refresh Twitch access token: HTTP {exc.code}{detail}"
-            ) from exc
-        except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            raise TwitchApiError(f"Could not refresh Twitch access token: {exc}") from exc
-        access_token = payload.get("access_token")
-        new_refresh_token = payload.get("refresh_token")
-        if not isinstance(access_token, str) or not isinstance(new_refresh_token, str):
-            raise TwitchApiError("Twitch returned an incomplete token refresh response")
-        return access_token, new_refresh_token
 
 
 class TwitchIrcConnection:
@@ -446,42 +368,6 @@ class TwitchBot:
             self._close_connection()
             return False
 
-    def _refresh_tokens(self) -> bool:
-        if not self.settings.client_secret or not self.settings.refresh_token:
-            LOGGER.error(
-                "Twitch rejected the access token, but TWITCH_CLIENT_SECRET or "
-                "TWITCH_REFRESH_TOKEN is not configured"
-            )
-            return False
-        try:
-            access_token, refresh_token = self.api.refresh_access_token(
-                self.settings.client_secret,
-                self.settings.refresh_token,
-            )
-            update_dotenv_values(
-                self.settings.dotenv_path,
-                {
-                    "TWITCH_OAUTH_TOKEN": access_token,
-                    "TWITCH_REFRESH_TOKEN": refresh_token,
-                },
-            )
-        except (BotConfigError, TwitchApiError) as exc:
-            LOGGER.error("Twitch token refresh failed: %s", exc)
-            return False
-
-        os.environ["TWITCH_OAUTH_TOKEN"] = access_token
-        os.environ["TWITCH_REFRESH_TOKEN"] = refresh_token
-        self.settings = replace(
-            self.settings,
-            oauth_token=access_token,
-            refresh_token=refresh_token,
-        )
-        self.api.oauth_token = access_token
-        self._stop_sending()
-        self._close_connection()
-        LOGGER.info("Twitch access token refreshed")
-        return True
-
     def run(self) -> None:
         LOGGER.info(
             "Bot started for #%s; send_always=%s",
@@ -499,18 +385,6 @@ class TwitchBot:
                     try:
                         stream_online = self.api.is_stream_online(self.settings.channel)
                         LOGGER.info("Stream status: %s", "online" if stream_online else "offline")
-                    except TwitchUnauthorizedError:
-                        if self._refresh_tokens():
-                            try:
-                                stream_online = self.api.is_stream_online(self.settings.channel)
-                                LOGGER.info(
-                                    "Stream status: %s",
-                                    "online" if stream_online else "offline",
-                                )
-                            except TwitchApiError as exc:
-                                LOGGER.warning(
-                                    "%s; keeping the last known stream status", exc
-                                )
                     except TwitchApiError as exc:
                         LOGGER.warning("%s; keeping the last known stream status", exc)
                     next_status_check = now + self.settings.status_check_interval
